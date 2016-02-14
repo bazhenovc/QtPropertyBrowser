@@ -10,8 +10,8 @@ Changes made:
 
 ## How to use it?
 
-Check out examples/simple/main.cpp
+Check out `examples/simple/main.cpp`
 
 ## How to add a custom property type?
 
-Check out doc/add_new_property_type.diff
+Check out `doc/add_new_property_type.diff`
