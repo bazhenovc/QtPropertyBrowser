@@ -110,6 +110,20 @@ int main(int argc, char **argv)
     item->setValue(QTime::currentTime());
     topItem->addSubProperty(item);
 
+    // FilePath property
+    item = variantManager->addProperty(QtVariantPropertyManager::filePathTypeId(), QString::number(i++) + QLatin1String(" FilePath Property (Open)"));
+    item->setAttribute(QLatin1String("filter"), "*.dds;*.png");
+    item->setAttribute(QLatin1Literal("mode"), "open");
+    item->setValue("");
+    topItem->addSubProperty(item);
+
+    item = variantManager->addProperty(QtVariantPropertyManager::filePathTypeId(), QString::number(i++) + QLatin1String(" FilePath Property (Save)"));
+    item->setAttribute(QLatin1String("filter"), "*.dat");
+    item->setAttribute(QLatin1Literal("mode"), "save");
+    item->setValue("");
+    topItem->addSubProperty(item);
+
+
     item = variantManager->addProperty(QVariant::DateTime, QString::number(i++) + QLatin1String(" DateTime Property"));
     item->setValue(QDateTime::currentDateTime());
     topItem->addSubProperty(item);
