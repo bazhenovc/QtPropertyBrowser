@@ -1,0 +1,686 @@
+ad31d71d105d6b59fb5c77c9140faf5fe7ddf86d
+ code/gui/property_browser.cc                       |  12 ++
+ external/qtpropertybrowser/src/qteditorfactory.cpp | 211 +++++++++++++++++++++
+ external/qtpropertybrowser/src/qteditorfactory.h   |  26 +++
+ .../qtpropertybrowser/src/qtpropertymanager.cpp    |  75 ++++++++
+ external/qtpropertybrowser/src/qtpropertymanager.h |  36 ++++
+ .../qtpropertybrowser/src/qtvariantproperty.cpp    |  96 +++++++++-
+ external/qtpropertybrowser/src/qtvariantproperty.h |   3 +
+ 7 files changed, 458 insertions(+), 1 deletion(-)
+
+diff --git a/code/gui/property_browser.cc b/code/gui/property_browser.cc
+index c6db225..9ec2590 100644
+--- a/code/gui/property_browser.cc
++++ b/code/gui/property_browser.cc
+@@ -63,6 +63,18 @@ PropertyBrowser::PropertyBrowser(QWidget* parent)
+         item->setValue("readonly text");
+         topItem->addSubProperty(item);
+ 
++        item = mVariantPropertyManager->addProperty(QtVariantPropertyManager::filePathTypeId(), QString::number(i++) + QLatin1String(" FilePath Property (Open)"));
++        item->setAttribute(QLatin1String("filter"), "*.dds;*.png");
++        item->setAttribute(QLatin1Literal("mode"), "open");
++        item->setValue("");
++        topItem->addSubProperty(item);
++
++        item = mVariantPropertyManager->addProperty(QtVariantPropertyManager::filePathTypeId(), QString::number(i++) + QLatin1String(" FilePath Property (Save)"));
++        item->setAttribute(QLatin1String("filter"), "*.dat");
++        item->setAttribute(QLatin1Literal("mode"), "save");
++        item->setValue("");
++        topItem->addSubProperty(item);
++
+         item = mVariantPropertyManager->addProperty(QVariant::Date, QString::number(i++) + QLatin1String(" Date Property"));
+         item->setValue(QDate::currentDate().addDays(2));
+         topItem->addSubProperty(item);
+diff --git a/external/qtpropertybrowser/src/qteditorfactory.cpp b/external/qtpropertybrowser/src/qteditorfactory.cpp
+index c9a371d..370add0 100644
+--- a/external/qtpropertybrowser/src/qteditorfactory.cpp
++++ b/external/qtpropertybrowser/src/qteditorfactory.cpp
+@@ -55,6 +55,7 @@
+ #include <QToolButton>
+ #include <QColorDialog>
+ #include <QFontDialog>
++#include <QFileDialog>
+ #include <QSpacerItem>
+ #include <QStyleOption>
+ #include <QPainter>
+@@ -2671,6 +2672,216 @@ void QtFontEditorFactory::connectPropertyManager(QtFontPropertyManager *manager)
+             this, SLOT(slotPropertyChanged(QtProperty*,QFont)));
+ }
+ 
++// QtFilePathEditor
++
++class QtFilePathEditor : public QWidget
++{
++    Q_OBJECT
++public:
++    QtFilePathEditor(QWidget *parent = 0);
++    void setFilePath(const QString &filePath) { if (theLineEdit->text() != filePath) theLineEdit->setText(filePath); }
++    QString filePath() const { return theLineEdit->text(); }
++    void setFilter(const QString &filter) { theFilter = filter; }
++    QString filter() const { return theFilter; }
++    void setMode(const QString &mode) { theMode = mode; }
++    QString mode() { return theMode; }
++signals:
++    void filePathChanged(const QString &filePath);
++protected:
++    void focusInEvent(QFocusEvent *e);
++    void focusOutEvent(QFocusEvent *e);
++    void keyPressEvent(QKeyEvent *e);
++    void keyReleaseEvent(QKeyEvent *e);
++private slots:
++    void buttonClicked();
++private:
++    QLineEdit *theLineEdit;
++    QString theFilter;
++    QString theMode;
++};
++
++QtFilePathEditor::QtFilePathEditor(QWidget *parent)
++    : QWidget(parent)
++{
++    QHBoxLayout *layout = new QHBoxLayout(this);
++    layout->setMargin(0);
++    layout->setSpacing(0);
++    theLineEdit = new QLineEdit(this);
++    theLineEdit->setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred));
++    QToolButton *button = new QToolButton(this);
++    button->setSizePolicy(QSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred));
++    button->setText(QLatin1String("..."));
++    layout->addWidget(theLineEdit);
++    layout->addWidget(button);
++    setFocusProxy(theLineEdit);
++    setFocusPolicy(Qt::StrongFocus);
++    setAttribute(Qt::WA_InputMethodEnabled);
++    connect(theLineEdit, SIGNAL(textEdited(const QString &)),
++                this, SIGNAL(filePathChanged(const QString &)));
++    connect(button, SIGNAL(clicked()),
++                this, SLOT(buttonClicked()));
++}
++
++void QtFilePathEditor::buttonClicked()
++{
++    QString filePath;
++    if (theMode == "save")
++        filePath = QFileDialog::getSaveFileName(this, tr("Save file"), theLineEdit->text(), theFilter);
++    else 
++        filePath = QFileDialog::getOpenFileName(this, tr("Open file"), theLineEdit->text(), theFilter);
++
++    if (filePath.isNull())
++        return;
++    theLineEdit->setText(filePath);
++    emit filePathChanged(filePath);
++}
++
++void QtFilePathEditor::focusInEvent(QFocusEvent *e)
++{
++    theLineEdit->event(e);
++    if (e->reason() == Qt::TabFocusReason || e->reason() == Qt::BacktabFocusReason) {
++        theLineEdit->selectAll();
++    }
++    QWidget::focusInEvent(e);
++}
++
++void QtFilePathEditor::focusOutEvent(QFocusEvent *e)
++{
++    theLineEdit->event(e);
++    QWidget::focusOutEvent(e);
++}
++
++void QtFilePathEditor::keyPressEvent(QKeyEvent *e)
++{
++    theLineEdit->event(e);
++}
++
++void QtFilePathEditor::keyReleaseEvent(QKeyEvent *e)
++{
++    theLineEdit->event(e);
++}
++
++
++// QtFilePathEditorFactory
++
++QtFilePathEditorFactory::~QtFilePathEditorFactory()
++{
++    QList<QtFilePathEditor *> editors = theEditorToProperty.keys();
++    QListIterator<QtFilePathEditor *> it(editors);
++    while (it.hasNext())
++        delete it.next();
++}
++
++void QtFilePathEditorFactory::connectPropertyManager(QtFilePathPropertyManager *manager)
++{
++    connect(manager, SIGNAL(valueChanged(QtProperty *, const QString &)),
++                this, SLOT(slotPropertyChanged(QtProperty *, const QString &)));
++    connect(manager, SIGNAL(filterChanged(QtProperty *, const QString &)),
++                this, SLOT(slotFilterChanged(QtProperty *, const QString &)));
++    connect(manager, SIGNAL(modeChanged(QtProperty *, const QString &)),
++                this, SLOT(slotModeChanged(QtProperty *, const QString &)));
++}
++
++QWidget *QtFilePathEditorFactory::createEditor(QtFilePathPropertyManager *manager,
++        QtProperty *property, QWidget *parent)
++{
++    QtFilePathEditor *editor = new QtFilePathEditor(parent);
++    editor->setFilePath(manager->value(property));
++    editor->setFilter(manager->filter(property));
++    editor->setMode(manager->mode(property));
++    theCreatedEditors[property].append(editor);
++    theEditorToProperty[editor] = property;
++
++    connect(editor, SIGNAL(filePathChanged(const QString &)),
++                this, SLOT(slotSetValue(const QString &)));
++    connect(editor, SIGNAL(destroyed(QObject *)),
++                this, SLOT(slotEditorDestroyed(QObject *)));
++    return editor;
++}
++
++void QtFilePathEditorFactory::disconnectPropertyManager(QtFilePathPropertyManager *manager)
++{
++    disconnect(manager, SIGNAL(valueChanged(QtProperty *, const QString &)),
++                this, SLOT(slotPropertyChanged(QtProperty *, const QString &)));
++    disconnect(manager, SIGNAL(filterChanged(QtProperty *, const QString &)),
++                this, SLOT(slotFilterChanged(QtProperty *, const QString &)));
++    disconnect(manager, SIGNAL(modeChanged(QtProperty *, const QString &)),
++                this, SLOT(slotModeChanged(QtProperty *, const QString &)));
++}
++
++void QtFilePathEditorFactory::slotPropertyChanged(QtProperty *property,
++                const QString &value)
++{
++    if (!theCreatedEditors.contains(property))
++        return;
++
++    QList<QtFilePathEditor *> editors = theCreatedEditors[property];
++    QListIterator<QtFilePathEditor *> itEditor(editors);
++    while (itEditor.hasNext())
++        itEditor.next()->setFilePath(value);
++}
++
++void QtFilePathEditorFactory::slotFilterChanged(QtProperty *property,
++            const QString &filter)
++{
++    if (!theCreatedEditors.contains(property))
++        return;
++
++    QList<QtFilePathEditor *> editors = theCreatedEditors[property];
++    QListIterator<QtFilePathEditor *> itEditor(editors);
++    while (itEditor.hasNext())
++        itEditor.next()->setFilter(filter);
++}
++
++void QtFilePathEditorFactory::slotModeChanged(QtProperty *property,
++            const QString &mode)
++{
++    if (!theCreatedEditors.contains(property))
++        return;
++
++    QList<QtFilePathEditor *> editors = theCreatedEditors[property];
++    QListIterator<QtFilePathEditor *> itEditor(editors);
++    while (itEditor.hasNext())
++        itEditor.next()->setMode(mode);
++}
++
++void QtFilePathEditorFactory::slotSetValue(const QString &value)
++{
++    QObject *object = sender();
++    QMap<QtFilePathEditor *, QtProperty *>::ConstIterator itEditor =
++                theEditorToProperty.constBegin();
++    while (itEditor != theEditorToProperty.constEnd()) {
++        if (itEditor.key() == object) {
++            QtProperty *property = itEditor.value();
++            QtFilePathPropertyManager *manager = propertyManager(property);
++            if (!manager)
++                return;
++            manager->setValue(property, value);
++            return;
++        }
++        itEditor++;
++    }
++}
++
++void QtFilePathEditorFactory::slotEditorDestroyed(QObject *object)
++{
++    QMap<QtFilePathEditor *, QtProperty *>::ConstIterator itEditor =
++                theEditorToProperty.constBegin();
++    while (itEditor != theEditorToProperty.constEnd()) {
++        if (itEditor.key() == object) {
++            QtFilePathEditor *editor = itEditor.key();
++            QtProperty *property = itEditor.value();
++            theEditorToProperty.remove(editor);
++            theCreatedEditors[property].removeAll(editor);
++            if (theCreatedEditors[property].isEmpty())
++                theCreatedEditors.remove(property);
++            return;
++        }
++        itEditor++;
++    }
++}
++
++
+ /*!
+     \internal
+ 
+diff --git a/external/qtpropertybrowser/src/qteditorfactory.h b/external/qtpropertybrowser/src/qteditorfactory.h
+index cbb2077..a6ca40e 100644
+--- a/external/qtpropertybrowser/src/qteditorfactory.h
++++ b/external/qtpropertybrowser/src/qteditorfactory.h
+@@ -399,6 +399,32 @@ private:
+     Q_PRIVATE_SLOT(d_func(), void slotSetValue(const QFont &))
+ };
+ 
++class QtFilePathEditor;
++
++class QT_QTPROPERTYBROWSER_EXPORT QtFilePathEditorFactory : public QtAbstractEditorFactory<QtFilePathPropertyManager>
++{
++    Q_OBJECT
++public:
++    QtFilePathEditorFactory(QObject *parent = 0)
++        : QtAbstractEditorFactory<QtFilePathPropertyManager>(parent)
++            { }
++    virtual ~QtFilePathEditorFactory();
++protected:
++    virtual void connectPropertyManager(QtFilePathPropertyManager *manager);
++    virtual QWidget *createEditor(QtFilePathPropertyManager *manager, QtProperty *property,
++                QWidget *parent);
++    virtual void disconnectPropertyManager(QtFilePathPropertyManager *manager);
++private slots:
++    void slotPropertyChanged(QtProperty *property, const QString &value);
++    void slotFilterChanged(QtProperty *property, const QString &filter);
++    void slotModeChanged(QtProperty *property, const QString &mode);
++    void slotSetValue(const QString &value);
++    void slotEditorDestroyed(QObject *object);
++private:
++    QMap<QtProperty *, QList<QtFilePathEditor *> > theCreatedEditors;
++    QMap<QtFilePathEditor *, QtProperty *> theEditorToProperty;
++};
++
+ #if QT_VERSION >= 0x040400
+ QT_END_NAMESPACE
+ #endif
+diff --git a/external/qtpropertybrowser/src/qtpropertymanager.cpp b/external/qtpropertybrowser/src/qtpropertymanager.cpp
+index a3bc78c..621c88d 100644
+--- a/external/qtpropertybrowser/src/qtpropertymanager.cpp
++++ b/external/qtpropertybrowser/src/qtpropertymanager.cpp
+@@ -561,6 +561,81 @@ void QtMetaEnumProvider::localeToIndex(QLocale::Language language, QLocale::Coun
+ 
+ Q_GLOBAL_STATIC(QtMetaEnumProvider, metaEnumProvider)
+ 
++// QtFilePathPropertyManager
++
++QString QtFilePathPropertyManager::value(const QtProperty *property) const
++{
++    if (!theValues.contains(property))
++        return QString();
++    return theValues[property].value;
++}
++
++QString QtFilePathPropertyManager::filter(const QtProperty *property) const
++{
++    if (!theValues.contains(property))
++        return QString();
++    return theValues[property].filter;
++}
++
++QString QtFilePathPropertyManager::mode(const QtProperty *property) const
++{
++    if (!theValues.contains(property))
++        return QString();
++    return theValues[property].mode;
++}
++
++void QtFilePathPropertyManager::setValue(QtProperty *property, const QString &val)
++{
++    if (!theValues.contains(property))
++        return;
++
++    Data data = theValues[property];
++
++    if (data.value == val)
++        return;
++
++    data.value = val;
++
++    theValues[property] = data;
++
++    emit propertyChanged(property);
++    emit valueChanged(property, data.value);
++}
++
++void QtFilePathPropertyManager::setFilter(QtProperty *property, const QString &fil)
++{
++    if (!theValues.contains(property))
++        return;
++
++    Data data = theValues[property];
++
++    if (data.filter == fil)
++        return;
++
++    data.filter = fil;
++
++    theValues[property] = data;
++
++    emit filterChanged(property, data.filter);
++}
++
++void QtFilePathPropertyManager::setMode(QtProperty *property, const QString &mode)
++{
++    if (!theValues.contains(property))
++        return;
++
++    Data data = theValues[property];
++
++    if (data.mode == mode)
++        return;
++
++    data.mode = mode;
++
++    theValues[property] = data;
++
++    emit modeChanged(property, data.mode);
++}
++
+ // QtGroupPropertyManager
+ 
+ /*!
+diff --git a/external/qtpropertybrowser/src/qtpropertymanager.h b/external/qtpropertybrowser/src/qtpropertymanager.h
+index d6b94cc..4f0675f 100644
+--- a/external/qtpropertybrowser/src/qtpropertymanager.h
++++ b/external/qtpropertybrowser/src/qtpropertymanager.h
+@@ -54,6 +54,42 @@ class QTime;
+ class QDateTime;
+ class QLocale;
+ 
++class QT_QTPROPERTYBROWSER_EXPORT QtFilePathPropertyManager : public QtAbstractPropertyManager
++{
++    Q_OBJECT
++public:
++    QtFilePathPropertyManager(QObject *parent = 0)
++        : QtAbstractPropertyManager(parent)
++            { }
++
++    QString value(const QtProperty *property) const;
++    QString filter(const QtProperty *property) const;
++    QString mode(const QtProperty *property) const;
++
++public slots:
++    void setValue(QtProperty *property, const QString &val);
++    void setFilter(QtProperty *property, const QString &fil);
++    void setMode(QtProperty *property, const QString &mode);
++signals:
++    void valueChanged(QtProperty *property, const QString &val);
++    void filterChanged(QtProperty *property, const QString &fil);
++    void modeChanged(QtProperty *property, const QString &mode);
++protected:
++    virtual QString valueText(const QtProperty *property) const { return value(property); }
++    virtual void initializeProperty(QtProperty *property) { theValues[property] = Data(); }
++    virtual void uninitializeProperty(QtProperty *property) { theValues.remove(property); }
++private:
++
++    struct Data
++    {
++        QString value;
++        QString filter;
++        QString mode;
++    };
++
++    QMap<const QtProperty *, Data> theValues;
++};
++
+ class QT_QTPROPERTYBROWSER_EXPORT QtGroupPropertyManager : public QtAbstractPropertyManager
+ {
+     Q_OBJECT
+diff --git a/external/qtpropertybrowser/src/qtvariantproperty.cpp b/external/qtpropertybrowser/src/qtvariantproperty.cpp
+index 017b06f..88736c0 100644
+--- a/external/qtpropertybrowser/src/qtvariantproperty.cpp
++++ b/external/qtpropertybrowser/src/qtvariantproperty.cpp
+@@ -69,6 +69,10 @@ class QtGroupPropertyType
+ {
+ };
+ 
++class QtFilePathPropertyType
++{
++};
++
+ #if QT_VERSION >= 0x040400
+ QT_END_NAMESPACE
+ #endif
+@@ -76,6 +80,7 @@ QT_END_NAMESPACE
+ Q_DECLARE_METATYPE(QtEnumPropertyType)
+ Q_DECLARE_METATYPE(QtFlagPropertyType)
+ Q_DECLARE_METATYPE(QtGroupPropertyType)
++Q_DECLARE_METATYPE(QtFilePathPropertyType)
+ 
+ #if QT_VERSION >= 0x040400
+ QT_BEGIN_NAMESPACE
+@@ -136,6 +141,19 @@ int QtVariantPropertyManager::iconMapTypeId()
+     return qMetaTypeId<QtIconMap>();
+ }
+ 
++/*!
++    Returns the type id for a file path attribute.
++
++    Note that the property's attribute type can be retrieved using then
++    attributeType() function.
++
++    \sa propertyType(), valueType()
++*/
++int QtVariantPropertyManager::filePathTypeId()
++{
++    return qMetaTypeId<QtFilePathPropertyType>();
++}
++
+ typedef QMap<const QtProperty *, QtProperty *> PropertyMap;
+ Q_GLOBAL_STATIC(PropertyMap, propertyToWrappedProperty)
+ 
+@@ -345,6 +363,8 @@ public:
+     void slotFlagNamesChanged(QtProperty *property, const QStringList &flagNames);
+     void slotReadOnlyChanged(QtProperty *property, bool readOnly);
+     void slotTextVisibleChanged(QtProperty *property, bool textVisible);
++    void slotFilePathFilterChanged(QtProperty *property, const QString &filter);
++    void slotFilePathModeChanged(QtProperty *property, const QString &filter);
+     void slotPropertyInserted(QtProperty *property, QtProperty *parent, QtProperty *after);
+     void slotPropertyRemoved(QtProperty *property, QtProperty *parent);
+ 
+@@ -377,6 +397,8 @@ public:
+     const QString m_echoModeAttribute;
+     const QString m_readOnlyAttribute;
+     const QString m_textVisibleAttribute;
++    const QString m_filePathFilterAttribute;
++    const QString m_filePathModeAttribute;
+ };
+ 
+ QtVariantPropertyManagerPrivate::QtVariantPropertyManagerPrivate() :
+@@ -391,7 +413,9 @@ QtVariantPropertyManagerPrivate::QtVariantPropertyManagerPrivate() :
+     m_regExpAttribute(QLatin1String("regExp")),
+     m_echoModeAttribute(QLatin1String("echoMode")),
+     m_readOnlyAttribute(QLatin1String("readOnly")),
+-    m_textVisibleAttribute(QLatin1String("textVisible"))
++    m_textVisibleAttribute(QLatin1String("textVisible")),
++    m_filePathFilterAttribute(QLatin1String("filter")),
++    m_filePathModeAttribute(QLatin1String("mode"))
+ {
+ }
+ 
+@@ -565,6 +589,18 @@ void QtVariantPropertyManagerPrivate::slotTextVisibleChanged(QtProperty *propert
+         emit q_ptr->attributeChanged(varProp, m_textVisibleAttribute, QVariant(textVisible));
+ }
+ 
++void QtVariantPropertyManagerPrivate::slotFilePathFilterChanged(QtProperty *property, const QString &filter)
++{
++    if (QtVariantProperty *varProp = m_internalToProperty.value(property, 0))
++        emit q_ptr->attributeChanged(varProp, m_filePathFilterAttribute, QVariant(filter));
++}
++
++void QtVariantPropertyManagerPrivate::slotFilePathModeChanged(QtProperty *property, const QString &mode)
++{
++    if (QtVariantProperty *varProp = m_internalToProperty.value(property, 0))
++        emit q_ptr->attributeChanged(varProp, m_filePathModeAttribute, QVariant(mode));
++}
++
+ void QtVariantPropertyManagerPrivate::slotValueChanged(QtProperty *property, const QDate &val)
+ {
+     valueChanged(property, QVariant(val));
+@@ -809,6 +845,9 @@ void QtVariantPropertyManagerPrivate::slotFlagNamesChanged(QtProperty *property,
+     \row
+         \o group
+         \o groupTypeId()
++    \row
++        \o FilePath
++        \o filePathTypeId()
+     \endtable
+ 
+     Each property type can provide additional attributes,
+@@ -916,6 +955,12 @@ void QtVariantPropertyManagerPrivate::slotFlagNamesChanged(QtProperty *property,
+         \o \c flag
+         \o flagNames
+         \o QVariant::StringList
++    \row
++        \o \c FilePath
++        \o filter
++        \o QVariant::String;
++        \o mode
++        \o QVariant::String;
+     \endtable
+ 
+     The attributes for a given property type can be retrieved using
+@@ -1287,6 +1332,19 @@ QtVariantPropertyManager::QtVariantPropertyManager(QObject *parent)
+     QtGroupPropertyManager *groupPropertyManager = new QtGroupPropertyManager(this);
+     d_ptr->m_typeToPropertyManager[groupId] = groupPropertyManager;
+     d_ptr->m_typeToValueType[groupId] = QVariant::Invalid;
++    // FilePathPropertyManager
++    int filePathId = filePathTypeId();
++    QtFilePathPropertyManager *filePathPropertyManager = new QtFilePathPropertyManager(this);
++    d_ptr->m_typeToPropertyManager[filePathId] = filePathPropertyManager;
++    d_ptr->m_typeToValueType[filePathId] = QVariant::Invalid;
++    d_ptr->m_typeToAttributeToAttributeType[filePathId][d_ptr->m_filePathFilterAttribute] = QVariant::String;
++    d_ptr->m_typeToAttributeToAttributeType[filePathId][d_ptr->m_filePathModeAttribute] = QVariant::String;
++    connect(filePathPropertyManager, SIGNAL(valueChanged(QtProperty *, const QString &)),
++            this, SLOT(slotValueChanged(QtProperty *, const QString &)));
++    connect(filePathPropertyManager, SIGNAL(filterChanged(QtProperty *, const QString &)),
++            this, SLOT(slotFilePathFilterChanged(QtProperty *, const QString &)));
++    connect(filePathPropertyManager, SIGNAL(modeChanged(QtProperty *, const QString &)),
++            this, SLOT(slotFilePathModeChanged(QtProperty *, const QString &)));
+ }
+ 
+ /*!
+@@ -1425,6 +1483,8 @@ QVariant QtVariantPropertyManager::value(const QtProperty *property) const
+ #endif
+     } else if (QtFlagPropertyManager *flagManager = qobject_cast<QtFlagPropertyManager *>(manager)) {
+         return flagManager->value(internProp);
++    } else if (QtFilePathPropertyManager *filePathManager = qobject_cast<QtFilePathPropertyManager *>(manager)) {
++        return filePathManager->value(internProp);
+     }
+     return QVariant();
+ }
+@@ -1577,6 +1637,12 @@ QVariant QtVariantPropertyManager::attributeValue(const QtProperty *property, co
+         if (attribute == d_ptr->m_flagNamesAttribute)
+             return flagManager->flagNames(internProp);
+         return QVariant();
++    } else if (QtFilePathPropertyManager *filePathManager = qobject_cast<QtFilePathPropertyManager *>(manager)) {
++        if (attribute == d_ptr->m_filePathFilterAttribute)
++            return filePathManager->filter(internProp);
++        else if (attribute == d_ptr->m_filePathModeAttribute)
++            return filePathManager->mode(internProp);
++        return QVariant();
+     }
+     return QVariant();
+ }
+@@ -1717,6 +1783,9 @@ void QtVariantPropertyManager::setValue(QtProperty *property, const QVariant &va
+     } else if (QtFlagPropertyManager *flagManager = qobject_cast<QtFlagPropertyManager *>(manager)) {
+         flagManager->setValue(internProp, val.value<int>());
+         return;
++    } else if (QtFilePathPropertyManager *filePathManager = qobject_cast<QtFilePathPropertyManager *>(manager)) {
++        filePathManager->setValue(internProp, val.value<QString>());
++        return;
+     }
+ }
+ 
+@@ -1829,6 +1898,12 @@ void QtVariantPropertyManager::setAttribute(QtProperty *property,
+         if (attribute == d_ptr->m_flagNamesAttribute)
+             flagManager->setFlagNames(internProp, value.value<QStringList>());
+         return;
++    } else if (QtFilePathPropertyManager *filePathManager = qobject_cast<QtFilePathPropertyManager *>(manager)) {
++        if (attribute == d_ptr->m_filePathFilterAttribute)
++            filePathManager->setFilter(internProp, value.value<QString>());
++        else if (attribute == d_ptr->m_filePathModeAttribute)
++            filePathManager->setMode(internProp, value.value<QString>());
++        return;
+     }
+ }
+ 
+@@ -1949,6 +2024,7 @@ public:
+     QtCursorEditorFactory      *m_cursorEditorFactory;
+     QtColorEditorFactory       *m_colorEditorFactory;
+     QtFontEditorFactory        *m_fontEditorFactory;
++    QtFilePathEditorFactory    *m_filePathEditorFactory;
+ 
+     QMap<QtAbstractEditorFactoryBase *, int> m_factoryToType;
+     QMap<int, QtAbstractEditorFactoryBase *> m_typeToFactory;
+@@ -2000,6 +2076,9 @@ public:
+     \row
+         \o QCursor
+         \o QComboBox
++    \row
++        \o FilePath
++        \o customized editor
+     \endtable
+ 
+     Note that QtVariantPropertyManager supports several additional property
+@@ -2072,6 +2151,11 @@ QtVariantEditorFactory::QtVariantEditorFactory(QObject *parent)
+     const int enumId = QtVariantPropertyManager::enumTypeId();
+     d_ptr->m_factoryToType[d_ptr->m_comboBoxFactory] = enumId;
+     d_ptr->m_typeToFactory[enumId] = d_ptr->m_comboBoxFactory;
++
++    d_ptr->m_filePathEditorFactory = new QtFilePathEditorFactory(this);
++    const int filePathId = QtVariantPropertyManager::filePathTypeId();
++    d_ptr->m_factoryToType[d_ptr->m_filePathEditorFactory] = filePathId;
++    d_ptr->m_typeToFactory[filePathId] = d_ptr->m_filePathEditorFactory;
+ }
+ 
+ /*!
+@@ -2209,6 +2293,11 @@ void QtVariantEditorFactory::connectPropertyManager(QtVariantPropertyManager *ma
+     QListIterator<QtFlagPropertyManager *> itFlag(flagPropertyManagers);
+     while (itFlag.hasNext())
+         d_ptr->m_checkBoxFactory->addPropertyManager(itFlag.next()->subBoolPropertyManager());
++
++    QList<QtFilePathPropertyManager *> filePathPropertyManagers = manager->findChildren<QtFilePathPropertyManager *>();
++    QListIterator<QtFilePathPropertyManager* > itFilePath(filePathPropertyManagers);
++    while (itFilePath.hasNext())
++        d_ptr->m_filePathEditorFactory->addPropertyManager(itFilePath.next());
+ }
+ 
+ /*!
+@@ -2353,6 +2442,11 @@ void QtVariantEditorFactory::disconnectPropertyManager(QtVariantPropertyManager
+     QListIterator<QtFlagPropertyManager *> itFlag(flagPropertyManagers);
+     while (itFlag.hasNext())
+         d_ptr->m_checkBoxFactory->removePropertyManager(itFlag.next()->subBoolPropertyManager());
++
++    QList<QtFilePathPropertyManager *> filePathPropertyManagers = manager->findChildren<QtFilePathPropertyManager *>();
++    QListIterator<QtFilePathPropertyManager *> itFilePath(filePathPropertyManagers);
++    while (itFilePath.hasNext())
++        d_ptr->m_filePathEditorFactory->removePropertyManager(itFilePath.next());
+ }
+ 
+ #if QT_VERSION >= 0x040400
+diff --git a/external/qtpropertybrowser/src/qtvariantproperty.h b/external/qtpropertybrowser/src/qtvariantproperty.h
+index 2c09fe9..780d265 100644
+--- a/external/qtpropertybrowser/src/qtvariantproperty.h
++++ b/external/qtpropertybrowser/src/qtvariantproperty.h
+@@ -100,6 +100,7 @@ public:
+     static int flagTypeId();
+     static int groupTypeId();
+     static int iconMapTypeId();
++    static int filePathTypeId();
+ public Q_SLOTS:
+     virtual void setValue(QtProperty *property, const QVariant &val);
+     virtual void setAttribute(QtProperty *property,
+@@ -154,6 +155,8 @@ private:
+     Q_PRIVATE_SLOT(d_func(), void slotFlagNamesChanged(QtProperty *, const QStringList &))
+     Q_PRIVATE_SLOT(d_func(), void slotReadOnlyChanged(QtProperty *, bool))
+     Q_PRIVATE_SLOT(d_func(), void slotTextVisibleChanged(QtProperty *, bool))
++    Q_PRIVATE_SLOT(d_func(), void slotFilePathFilterChanged(QtProperty *, const QString &))
++    Q_PRIVATE_SLOT(d_func(), void slotFilePathModeChanged(QtProperty *, const QString &))
+     Q_PRIVATE_SLOT(d_func(), void slotPropertyInserted(QtProperty *, QtProperty *, QtProperty *))
+     Q_PRIVATE_SLOT(d_func(), void slotPropertyRemoved(QtProperty *, QtProperty *))
+     Q_DECLARE_PRIVATE(QtVariantPropertyManager)
